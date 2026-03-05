@@ -39,6 +39,25 @@ def _build_api_url(client_endpoint: str, method: str) -> str:
     return f"{base}/{method}"
 
 
+def register_event_handlers(
+    client_endpoint: str,
+    access_token: str,
+    handler_url: str,
+) -> None:
+    """
+    Регистрирует обработчики OnCrmContactAdd и OnCrmLeadAdd через event.bind.
+
+    Вызывается при ONAPPINSTALL — иначе Bitrix24 не будет отправлять события.
+    """
+    for event_name in ("OnCrmContactAdd", "OnCrmLeadAdd"):
+        _call_bitrix24_api(
+            client_endpoint,
+            "event.bind",
+            access_token,
+            {"event": event_name, "handler": handler_url},
+        )
+
+
 def fetch_contact_and_convert(payload: Bitrix24WebhookPayload) -> ContactPayload:
     """
     Получает контакт из Bitrix24 и преобразует в ContactPayload.
