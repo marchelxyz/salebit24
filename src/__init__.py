@@ -1,0 +1,1 @@
+"""CRM Telegram Notifier application."""
