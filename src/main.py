@@ -130,7 +130,7 @@ async def handle_telegram_webhook(body: dict[str, Any] = Body(...)) -> dict[str,
     if text == "/start" and chat_id is not None:
         set_chat_id(chat_id)
         logger.info("Chat ID зарегистрирован: %s", chat_id)
-    return {"ok": True}
+    return {"status": "ok"}
 
 
 @app.post("/webhook/bitrix24")
