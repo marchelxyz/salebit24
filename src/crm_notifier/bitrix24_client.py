@@ -26,7 +26,12 @@ def _call_bitrix24_api(
     payload = {**params, "auth": access_token}
     with httpx.Client(timeout=15.0) as client:
         response = client.post(url, json=payload)
-        response.raise_for_status()
+        try:
+            response.raise_for_status()
+        except httpx.HTTPStatusError as e:
+            body = response.text
+            logger.error("Bitrix24 %s: %s %s, body=%s", method, response.status_code, e, body)
+            raise
         data = response.json()
     if "error" in data:
         raise ValueError(f"Bitrix24 API error: {data.get('error_description', data['error'])}")
@@ -49,7 +54,7 @@ def register_event_handlers(
 
     Вызывается при ONAPPINSTALL — иначе Bitrix24 не будет отправлять события.
     """
-    for event_name in ("OnCrmContactAdd", "OnCrmLeadAdd"):
+    for event_name in ("ONCRMCONTACTADD", "ONCRMLEADADD"):
         _call_bitrix24_api(
             client_endpoint,
             "event.bind",
