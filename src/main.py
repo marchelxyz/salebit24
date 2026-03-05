@@ -1,9 +1,12 @@
 """Точка входа: FastAPI-приложение для приёма вебхуков CRM."""
 
+import json
 import logging
 import os
+import re
+from urllib.parse import parse_qs
 
-from fastapi import Body, FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from uvicorn import run
 
 from src.crm_notifier.bitrix24_client import fetch_contact_and_convert, fetch_lead_and_convert
@@ -52,17 +55,48 @@ def handle_crm_webhook(payload: ContactPayload) -> dict[str, str]:
 
 
 @app.post("/webhook/bitrix24")
-def handle_bitrix24_webhook(body: dict = Body(...)) -> dict[str, str]:
+async def handle_bitrix24_webhook(request: Request) -> dict[str, str]:
     """
     Обработчик исходящих вебхуков Bitrix24.
 
     Принимает события OnCrmContactAdd и OnCrmLeadAdd.
     Подпишите на них локальное приложение — URL этого endpoint.
     """
+    content_type = request.headers.get("content-type", "")
+    raw_body = await request.body()
+    body_preview = raw_body[:2000].decode("utf-8", errors="replace") if raw_body else "(empty)"
+    if "access_token" in body_preview:
+        body_preview = re.sub(r'"access_token"\s*:\s*"[^"]*"', '"access_token":"***"', body_preview)
+    logger.info(
+        "Bitrix24 webhook: content-type=%s, body_len=%d, body=%s",
+        content_type,
+        len(raw_body),
+        body_preview,
+    )
+
+    body: dict
+    if "application/json" in content_type:
+        try:
+            body = json.loads(raw_body) if raw_body else {}
+        except json.JSONDecodeError as e:
+            logger.warning("Bitrix24 webhook: некорректный JSON: %s", e)
+            raise HTTPException(status_code=400, detail="Невалидный JSON") from e
+    elif "application/x-www-form-urlencoded" in content_type:
+        parsed = parse_qs(raw_body.decode("utf-8", errors="replace"))
+        body = {k: (v[0] if len(v) == 1 else v) for k, v in parsed.items()}
+        if "data" in body and isinstance(body["data"], str):
+            try:
+                body["data"] = json.loads(body["data"])
+            except json.JSONDecodeError:
+                pass
+    else:
+        logger.warning("Bitrix24 webhook: неожиданный content-type: %s", content_type)
+        raise HTTPException(status_code=415, detail=f"Ожидается JSON или form-urlencoded, получен: {content_type}")
+
     try:
         payload = Bitrix24WebhookPayload.model_validate(body)
     except Exception as e:
-        logger.warning("Неверный формат webhook: %s", e)
+        logger.warning("Bitrix24 webhook: ошибка валидации: %s, body=%s", e, body)
         raise HTTPException(status_code=400, detail="Неверный формат payload") from e
 
     event = payload.event.upper()
