@@ -1,13 +1,20 @@
 """Точка входа: FastAPI-приложение для приёма вебхуков CRM."""
 
+import json
 import logging
 import os
+import re
+from typing import Any
+from urllib.parse import parse_qs
 
-from fastapi import Body, FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from uvicorn import run
 
 from src.crm_notifier.bitrix24_client import fetch_contact_and_convert, fetch_lead_and_convert
-from src.crm_notifier.bitrix24_models import Bitrix24WebhookPayload
+from src.crm_notifier.bitrix24_models import (
+    Bitrix24WebhookPayload,
+    parse_bitrix24_payload_flexible,
+)
 from src.crm_notifier.models import ContactPayload
 from src.crm_notifier.telegram_client import send_contact_notification
 
@@ -24,6 +31,26 @@ app = FastAPI(
 )
 
 SUPPORTED_BITRIX_EVENTS = {"ONCRMCONTACTADD", "ONCRMLEADADD"}
+
+
+def _unflatten_form(parsed: dict[str, list[str]]) -> dict[str, Any]:
+    """Разворачивает data[FIELDS][ID]=123 в data: {FIELDS: {ID: 123}}."""
+    result: dict[str, Any] = {}
+    for key, val_list in parsed.items():
+        val = val_list[0] if len(val_list) == 1 else val_list
+        if "[" not in key:
+            result[key] = val
+            continue
+        parts = key.replace("]", "").split("[")
+        current = result
+        for i, part in enumerate(parts):
+            if i == len(parts) - 1:
+                current[part] = val
+                break
+            if part not in current:
+                current[part] = {}
+            current = current[part]
+    return result
 
 
 @app.get("/")
@@ -52,18 +79,52 @@ def handle_crm_webhook(payload: ContactPayload) -> dict[str, str]:
 
 
 @app.post("/webhook/bitrix24")
-def handle_bitrix24_webhook(body: dict = Body(...)) -> dict[str, str]:
+async def handle_bitrix24_webhook(request: Request) -> dict[str, str]:
     """
     Обработчик исходящих вебхуков Bitrix24.
 
     Принимает события OnCrmContactAdd и OnCrmLeadAdd.
     Подпишите на них локальное приложение — URL этого endpoint.
     """
+    content_type = request.headers.get("content-type", "")
+    raw_body = await request.body()
+    body_preview = raw_body[:2000].decode("utf-8", errors="replace") if raw_body else "(empty)"
+    if "access_token" in body_preview:
+        body_preview = re.sub(r'"access_token"\s*:\s*"[^"]*"', '"access_token":"***"', body_preview)
+    logger.info(
+        "Bitrix24 webhook: content-type=%s, body_len=%d, body=%s",
+        content_type,
+        len(raw_body),
+        body_preview,
+    )
+
+    body: dict
+    if "application/json" in content_type:
+        try:
+            body = json.loads(raw_body) if raw_body else {}
+        except json.JSONDecodeError as e:
+            logger.warning("Bitrix24 webhook: некорректный JSON: %s", e)
+            raise HTTPException(status_code=400, detail="Невалидный JSON") from e
+    elif "application/x-www-form-urlencoded" in content_type:
+        parsed = parse_qs(raw_body.decode("utf-8", errors="replace"))
+        body = _unflatten_form(parsed)
+        if "data" in body and isinstance(body["data"], str):
+            try:
+                body["data"] = json.loads(body["data"])
+            except json.JSONDecodeError:
+                pass
+    else:
+        logger.warning("Bitrix24 webhook: неожиданный content-type: %s", content_type)
+        raise HTTPException(status_code=415, detail=f"Ожидается JSON или form-urlencoded, получен: {content_type}")
+
     try:
         payload = Bitrix24WebhookPayload.model_validate(body)
     except Exception as e:
-        logger.warning("Неверный формат webhook: %s", e)
-        raise HTTPException(status_code=400, detail="Неверный формат payload") from e
+        logger.warning("Bitrix24 webhook: ошибка валидации, пробуем гибкий парсер: %s", e)
+        payload = parse_bitrix24_payload_flexible(body)
+        if payload is None:
+            logger.warning("Bitrix24 webhook: не удалось распарсить, body=%s", body)
+            raise HTTPException(status_code=400, detail="Неверный формат payload") from e
 
     event = payload.event.upper()
     if event not in SUPPORTED_BITRIX_EVENTS:
@@ -82,6 +143,13 @@ def handle_bitrix24_webhook(body: dict = Body(...)) -> dict[str, str]:
             contact_payload = fetch_contact_and_convert(payload)
         else:
             contact_payload = fetch_lead_and_convert(payload)
+        logger.info(
+            "Bitrix24: entity_id=%s, name=%s, phone=%s, title=%s",
+            payload.get_entity_id(),
+            contact_payload.name,
+            contact_payload.phone[:3] + "***" if len(contact_payload.phone) > 3 else contact_payload.phone,
+            contact_payload.title,
+        )
         send_contact_notification(contact_payload)
         logger.info("Уведомление отправлено: %s (событие %s)", contact_payload.name, event)
         return {"status": "ok", "message": "Уведомление отправлено"}
