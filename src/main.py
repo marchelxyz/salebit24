@@ -10,7 +10,11 @@ from urllib.parse import parse_qs
 from fastapi import FastAPI, HTTPException, Request
 from uvicorn import run
 
-from src.crm_notifier.bitrix24_client import fetch_contact_and_convert, fetch_lead_and_convert
+from src.crm_notifier.bitrix24_client import (
+    fetch_contact_and_convert,
+    fetch_lead_and_convert,
+    register_event_handlers,
+)
 from src.crm_notifier.bitrix24_models import (
     Bitrix24WebhookPayload,
     parse_bitrix24_payload_flexible,
@@ -116,6 +120,27 @@ async def handle_bitrix24_webhook(request: Request) -> dict[str, str]:
     else:
         logger.warning("Bitrix24 webhook: неожиданный content-type: %s", content_type)
         raise HTTPException(status_code=415, detail=f"Ожидается JSON или form-urlencoded, получен: {content_type}")
+
+    event = (body.get("event") or body.get("EVENT") or "").upper()
+    auth_raw = body.get("auth") or body.get("AUTH")
+    if isinstance(auth_raw, dict):
+        access_token = auth_raw.get("access_token") or auth_raw.get("ACCESS_TOKEN")
+        client_endpoint = auth_raw.get("client_endpoint") or auth_raw.get("CLIENT_ENDPOINT")
+    else:
+        access_token = client_endpoint = None
+
+    if event == "ONAPPINSTALL" and access_token and client_endpoint:
+        handler_url = os.environ.get("BITRIX24_HANDLER_URL") or (
+            str(request.base_url).rstrip("/") + "/webhook/bitrix24"
+        )
+        logger.info("Bitrix24 ONAPPINSTALL: регистрация event.bind, handler=%s", handler_url)
+        try:
+            register_event_handlers(client_endpoint, access_token, handler_url)
+            logger.info("Bitrix24: OnCrmContactAdd и OnCrmLeadAdd зарегистрированы")
+            return {"status": "ok", "message": "Event handlers registered"}
+        except Exception as e:
+            logger.exception("Bitrix24 ONAPPINSTALL: ошибка event.bind: %s", e)
+            raise HTTPException(status_code=500, detail="Ошибка регистрации событий") from e
 
     try:
         payload = Bitrix24WebhookPayload.model_validate(body)
