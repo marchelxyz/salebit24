@@ -5,6 +5,8 @@ from typing import TYPE_CHECKING
 
 import httpx
 
+from src.crm_notifier.telegram_chat_store import get_chat_id as _get_stored_chat_id
+
 if TYPE_CHECKING:
     from src.crm_notifier.models import ContactPayload
 
@@ -21,12 +23,18 @@ def _get_bot_token() -> str:
 
 
 def _get_chat_id() -> str:
-    """Возвращает ID чата для уведомлений."""
+    """Возвращает ID чата: TELEGRAM_CHAT_ID или chat_id от /start."""
     chat_id = os.environ.get("TELEGRAM_CHAT_ID")
-    if not chat_id:
-        msg = "TELEGRAM_CHAT_ID не задан в переменных окружения"
-        raise ValueError(msg)
-    return chat_id
+    if chat_id:
+        return chat_id
+    chat_id = _get_stored_chat_id()
+    if chat_id:
+        return chat_id
+    msg = (
+        "TELEGRAM_CHAT_ID не задан. Отправьте /start боту в Telegram, "
+        "или задайте TELEGRAM_CHAT_ID в переменных окружения"
+    )
+    raise ValueError(msg)
 
 
 def _normalize_phone(phone: str) -> str:

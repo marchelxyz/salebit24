@@ -7,7 +7,7 @@ import re
 from typing import Any
 from urllib.parse import parse_qs
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import Body, FastAPI, HTTPException, Request
 from uvicorn import run
 
 from src.crm_notifier.bitrix24_client import (
@@ -20,6 +20,7 @@ from src.crm_notifier.bitrix24_models import (
     parse_bitrix24_payload_flexible,
 )
 from src.crm_notifier.models import ContactPayload
+from src.crm_notifier.telegram_chat_store import set_chat_id
 from src.crm_notifier.telegram_client import send_contact_notification
 
 logging.basicConfig(
@@ -35,6 +36,22 @@ app = FastAPI(
 )
 
 SUPPORTED_BITRIX_EVENTS = {"ONCRMCONTACTADD", "ONCRMLEADADD"}
+
+
+def _get_telegram_webhook_url() -> str | None:
+    """URL для Telegram webhook (напр. https://xxx.railway.app/webhook/telegram)."""
+    full = os.environ.get("TELEGRAM_WEBHOOK_URL")
+    if full:
+        return full
+    bitrix = os.environ.get("BITRIX24_HANDLER_URL", "")
+    base = (
+        os.environ.get("TELEGRAM_WEBHOOK_BASE_URL")
+        or os.environ.get("RAILWAY_STATIC_URL")
+        or (bitrix.rstrip("/").replace("/webhook/bitrix24", "") if bitrix else "")
+    )
+    if base and not base.startswith("http"):
+        base = "https://" + base
+    return f"{base}/webhook/telegram" if base else None
 
 
 def _unflatten_form(parsed: dict[str, list[str]]) -> dict[str, Any]:
@@ -55,6 +72,25 @@ def _unflatten_form(parsed: dict[str, list[str]]) -> dict[str, Any]:
                 current[part] = {}
             current = current[part]
     return result
+
+
+@app.on_event("startup")
+def _register_telegram_webhook() -> None:
+    """Регистрирует webhook Telegram при старте (если настроен URL)."""
+    token = os.environ.get("TELEGRAM_BOT_TOKEN")
+    webhook_url = _get_telegram_webhook_url()
+    if token and webhook_url:
+        import httpx
+
+        url = f"https://api.telegram.org/bot{token}/setWebhook"
+        try:
+            resp = httpx.post(url, json={"url": webhook_url}, timeout=10.0)
+            if resp.is_success:
+                logger.info("Telegram webhook зарегистрирован: %s", webhook_url)
+            else:
+                logger.warning("Telegram setWebhook failed: %s", resp.text)
+        except Exception as e:
+            logger.warning("Не удалось зарегистрировать Telegram webhook: %s", e)
 
 
 @app.get("/")
@@ -80,6 +116,21 @@ def handle_crm_webhook(payload: ContactPayload) -> dict[str, str]:
     except Exception as e:
         logger.exception("Ошибка отправки в Telegram")
         raise HTTPException(status_code=500, detail="Ошибка отправки уведомления") from e
+
+
+@app.post("/webhook/telegram")
+async def handle_telegram_webhook(body: dict[str, Any] = Body(...)) -> dict[str, str]:
+    """
+    Webhook для обновлений Telegram. Сохраняет chat_id при /start.
+    """
+    message = body.get("message") or {}
+    text = (message.get("text") or "").strip()
+    chat = message.get("chat") or {}
+    chat_id = chat.get("id")
+    if text == "/start" and chat_id is not None:
+        set_chat_id(chat_id)
+        logger.info("Chat ID зарегистрирован: %s", chat_id)
+    return {"ok": True}
 
 
 @app.post("/webhook/bitrix24")
