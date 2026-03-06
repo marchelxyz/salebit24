@@ -50,7 +50,7 @@ def _normalize_phone(phone: str) -> str:
 def _build_phone_link(phone: str) -> str:
     """Формирует кликабельную ссылку callto: для открытия в Mango Telecom."""
     normalized = _normalize_phone(phone)
-    return f"callto:+{normalized}"
+    return f"callto:{normalized}"
 
 
 def _format_phone_for_telegram(phone: str) -> str:
