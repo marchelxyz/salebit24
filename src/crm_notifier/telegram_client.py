@@ -38,23 +38,6 @@ def _get_chat_id() -> str:
     raise ValueError(msg)
 
 
-def _normalize_phone(phone: str) -> str:
-    """Приводит номер телефона к формату 7XXXXXXXXXX для Mango Office."""
-    digits = "".join(c for c in phone if c.isdigit())
-    if digits.startswith("8") and len(digits) == 11:
-        digits = "7" + digits[1:]
-    elif digits.startswith("9") and len(digits) == 10:
-        digits = "7" + digits
-    return digits
-
-
-def _build_phone_link(phone: str) -> str:
-    """Формирует HTTPS-ссылку редиректа на callto: для Telegram."""
-    normalized = _normalize_phone(phone)
-    base_url = _get_public_base_url()
-    return f"{base_url}/call/{normalized}"
-
-
 def _format_phone_for_telegram(phone: str) -> str:
     """Приводит номер к формату +79991234567 для автоопределения Telegram."""
     normalized = _normalize_phone(phone)
@@ -90,8 +73,6 @@ def _format_message(payload: "ContactPayload") -> str:
     if payload.title:
         lines.append(f"<b>Название:</b> {_escape_html(payload.title)}")
     lines.append(f"<b>Имя:</b> {_escape_html(payload.name)}")
-    phone_link = _build_phone_link(payload.phone)
-    lines.append(f'<b>Телефон:</b> <a href="{phone_link}">{_escape_html(payload.phone)}</a>')
     phone_telegram = _format_phone_for_telegram(payload.phone)
     lines.append(phone_telegram)
     return "\n".join(lines)
