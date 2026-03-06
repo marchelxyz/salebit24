@@ -11,7 +11,6 @@ if TYPE_CHECKING:
     from src.crm_notifier.models import ContactPayload
 
 TELEGRAM_API_BASE = "https://api.telegram.org/bot"
-DEFAULT_PUBLIC_BASE_URL = "https://web-production-78acf.up.railway.app"
 
 
 def _get_bot_token() -> str:
@@ -38,24 +37,20 @@ def _get_chat_id() -> str:
     raise ValueError(msg)
 
 
+def _normalize_phone(phone: str) -> str:
+    """Приводит номер телефона к формату 7XXXXXXXXXX для Mango Office."""
+    digits = "".join(c for c in phone if c.isdigit())
+    if digits.startswith("8") and len(digits) == 11:
+        digits = "7" + digits[1:]
+    elif digits.startswith("9") and len(digits) == 10:
+        digits = "7" + digits
+    return digits
+
+
 def _format_phone_for_telegram(phone: str) -> str:
     """Приводит номер к формату +79991234567 для автоопределения Telegram."""
     normalized = _normalize_phone(phone)
     return f"+{normalized}"
-
-
-def _get_public_base_url() -> str:
-    """Возвращает публичный базовый URL сервиса для внешних ссылок."""
-    base_url = (
-        os.environ.get("TELEGRAM_LINK_BASE_URL")
-        or os.environ.get("PUBLIC_BASE_URL")
-        or os.environ.get("RAILWAY_STATIC_URL")
-        or DEFAULT_PUBLIC_BASE_URL
-    )
-    base_url = base_url.rstrip("/")
-    if not base_url.startswith(("http://", "https://")):
-        base_url = "https://" + base_url
-    return base_url
 
 
 def _escape_html(text: str) -> str:
@@ -73,6 +68,7 @@ def _format_message(payload: "ContactPayload") -> str:
     if payload.title:
         lines.append(f"<b>Название:</b> {_escape_html(payload.title)}")
     lines.append(f"<b>Имя:</b> {_escape_html(payload.name)}")
+    lines.append(f"<b>Телефон:</b> {_escape_html(payload.phone)}")
     phone_telegram = _format_phone_for_telegram(payload.phone)
     lines.append(phone_telegram)
     return "\n".join(lines)

@@ -30,6 +30,13 @@ def _call_bitrix24_api(
             response.raise_for_status()
         except httpx.HTTPStatusError as e:
             body = response.text
+            if (
+                method == "event.bind"
+                and response.status_code == 400
+                and "Handler already binded" in body
+            ):
+                logger.info("Bitrix24 %s: handler уже привязан, продолжаем без ошибки", method)
+                return {}
             logger.error("Bitrix24 %s: %s %s, body=%s", method, response.status_code, e, body)
             raise
         data = response.json()
