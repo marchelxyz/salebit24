@@ -108,7 +108,9 @@ def redirect_to_callto(phone: str) -> RedirectResponse:
     normalized = _normalize_phone_digits(phone)
     if not normalized:
         raise HTTPException(status_code=400, detail="Неверный формат номера телефона")
-    return RedirectResponse(url=f"callto:{normalized}", status_code=302)
+    redirect_url = f"callto://+{normalized}"
+    logger.info("Call redirect: phone=%s, redirect_url=%s", normalized, redirect_url)
+    return RedirectResponse(url=redirect_url, status_code=302)
 
 
 @app.post("/webhook/crm")
