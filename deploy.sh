@@ -5,8 +5,7 @@
 #
 # Перед запуском задайте переменные окружения:
 #   export TELEGRAM_BOT_TOKEN="..."
-#   export TELEGRAM_CHAT_ID="..."
-#   export MANGO_CALL_URL_TEMPLATE="..."  # опционально
+#   export TELEGRAM_CHAT_ID="..."  # опционально
 #
 
 set -e
@@ -60,13 +59,6 @@ for var in "${REQUIRED[@]}"; do
         railway variables set "$var=${!var}"
     fi
 done
-
-if [[ -n "$MANGO_CALL_URL_TEMPLATE" ]]; then
-    railway variables set "MANGO_CALL_URL_TEMPLATE=$MANGO_CALL_URL_TEMPLATE"
-    echo "MANGO_CALL_URL_TEMPLATE установлен (ссылка откроется в Mango Office)"
-else
-    echo "MANGO_CALL_URL_TEMPLATE не задан — телефон будет в формате tel:+7..."
-fi
 
 # Деплой
 echo ""

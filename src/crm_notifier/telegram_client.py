@@ -48,12 +48,15 @@ def _normalize_phone(phone: str) -> str:
 
 
 def _build_phone_link(phone: str) -> str:
-    """Формирует кликабельную ссылку для номера телефона."""
+    """Формирует кликабельную ссылку callto: для открытия в Mango Telecom."""
     normalized = _normalize_phone(phone)
-    template = os.environ.get("MANGO_CALL_URL_TEMPLATE")
-    if template and "{phone}" in template:
-        return template.replace("{phone}", normalized)
-    return f"tel:+{normalized}"
+    return f"callto:+{normalized}"
+
+
+def _format_phone_for_telegram(phone: str) -> str:
+    """Приводит номер к формату +79991234567 для автоопределения Telegram."""
+    normalized = _normalize_phone(phone)
+    return f"+{normalized}"
 
 
 def _escape_html(text: str) -> str:
@@ -73,6 +76,8 @@ def _format_message(payload: "ContactPayload") -> str:
     lines.append(f"<b>Имя:</b> {_escape_html(payload.name)}")
     phone_link = _build_phone_link(payload.phone)
     lines.append(f'<b>Телефон:</b> <a href="{phone_link}">{_escape_html(payload.phone)}</a>')
+    phone_telegram = _format_phone_for_telegram(payload.phone)
+    lines.append(phone_telegram)
     return "\n".join(lines)
 
 
