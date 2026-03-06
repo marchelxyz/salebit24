@@ -11,6 +11,7 @@ if TYPE_CHECKING:
     from src.crm_notifier.models import ContactPayload
 
 TELEGRAM_API_BASE = "https://api.telegram.org/bot"
+DEFAULT_PUBLIC_BASE_URL = "https://web-production-78acf.up.railway.app"
 
 
 def _get_bot_token() -> str:
@@ -48,15 +49,30 @@ def _normalize_phone(phone: str) -> str:
 
 
 def _build_phone_link(phone: str) -> str:
-    """Формирует кликабельную ссылку callto: для открытия в Mango Telecom."""
+    """Формирует HTTPS-ссылку редиректа на callto: для Telegram."""
     normalized = _normalize_phone(phone)
-    return f"callto:{normalized}"
+    base_url = _get_public_base_url()
+    return f"{base_url}/call/{normalized}"
 
 
 def _format_phone_for_telegram(phone: str) -> str:
     """Приводит номер к формату +79991234567 для автоопределения Telegram."""
     normalized = _normalize_phone(phone)
     return f"+{normalized}"
+
+
+def _get_public_base_url() -> str:
+    """Возвращает публичный базовый URL сервиса для внешних ссылок."""
+    base_url = (
+        os.environ.get("TELEGRAM_LINK_BASE_URL")
+        or os.environ.get("PUBLIC_BASE_URL")
+        or os.environ.get("RAILWAY_STATIC_URL")
+        or DEFAULT_PUBLIC_BASE_URL
+    )
+    base_url = base_url.rstrip("/")
+    if not base_url.startswith(("http://", "https://")):
+        base_url = "https://" + base_url
+    return base_url
 
 
 def _escape_html(text: str) -> str:

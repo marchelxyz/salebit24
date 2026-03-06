@@ -8,6 +8,7 @@ from typing import Any
 from urllib.parse import parse_qs
 
 from fastapi import Body, FastAPI, HTTPException, Request
+from fastapi.responses import RedirectResponse
 from uvicorn import run
 
 from src.crm_notifier.bitrix24_client import (
@@ -97,6 +98,17 @@ def _register_telegram_webhook() -> None:
 def health_check() -> dict[str, str]:
     """Проверка работоспособности сервиса."""
     return {"status": "ok", "service": "crm-telegram-notifier"}
+
+
+@app.get("/call/{phone}")
+def redirect_to_callto(phone: str) -> RedirectResponse:
+    """
+    Редиректит на callto: с нормализованным номером для Mango Telecom.
+    """
+    normalized = _normalize_phone_digits(phone)
+    if not normalized:
+        raise HTTPException(status_code=400, detail="Неверный формат номера телефона")
+    return RedirectResponse(url=f"callto:{normalized}", status_code=302)
 
 
 @app.post("/webhook/crm")
@@ -241,6 +253,26 @@ def _main() -> None:
     """Запускает сервер."""
     port = int(os.environ.get("PORT", "8000"))
     run(app, host="0.0.0.0", port=port)
+
+
+def _normalize_phone_digits(phone: str) -> str:
+    """
+    Нормализует номер телефона до формата 7XXXXXXXXXX.
+
+    Args:
+        phone: Номер телефона в любом распространенном формате.
+
+    Returns:
+        Номер в формате 7XXXXXXXXXX или пустая строка при некорректном входе.
+    """
+    digits = "".join(c for c in phone if c.isdigit())
+    if digits.startswith("8") and len(digits) == 11:
+        return "7" + digits[1:]
+    if digits.startswith("9") and len(digits) == 10:
+        return "7" + digits
+    if digits.startswith("7") and len(digits) == 11:
+        return digits
+    return ""
 
 
 if __name__ == "__main__":
